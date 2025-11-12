@@ -28,6 +28,7 @@ __pycache__/
 *.swo
 *~
 
+.gitignore
 
 src/openarm_servo/launch/servo_both.launch.py
 src/openarm_servo/openarm_servo/keyboard_servo_both.py
