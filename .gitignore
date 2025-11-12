@@ -4,10 +4,6 @@ install/
 log/
 backup/
 
-# src 내 다른 패키지들 (서브모듈로 추가할 예정)
-src/openarm_can/
-src/openarm_description/
-
 # src 내 기타 패키지들
 src/openarm_mujoco/
 src/openarm_mujoco_hardware/
