@@ -1,0 +1,3 @@
+[submodule "src/openarm_ros2"]
+	path = src/openarm_ros2
+	url = https://github.com/XHAKA3456/openarm_ros2.git

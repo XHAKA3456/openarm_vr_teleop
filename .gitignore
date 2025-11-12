@@ -6,7 +6,6 @@ backup/
 
 # src 내 다른 패키지들 (서브모듈로 추가할 예정)
 src/openarm_can/
-src/openarm_ros2/
 src/openarm_description/
 
 # src 내 기타 패키지들
