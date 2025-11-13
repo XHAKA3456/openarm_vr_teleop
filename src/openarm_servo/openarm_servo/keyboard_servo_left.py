@@ -5,8 +5,11 @@ Keyboard input for MoveIt Servo - OpenArm version (with logging)
 
 import rclpy
 from rclpy.node import Node
+from rclpy.action import ActionClient
 from geometry_msgs.msg import TwistStamped
+from sensor_msgs.msg import JointState
 from control_msgs.msg import JointJog
+from control_msgs.action import GripperCommand
 import sys
 import termios
 import tty
@@ -28,9 +31,30 @@ class KeyboardServo(Node):
             10
         )
 
+        # Gripper action client
+        self.gripper_action_client = ActionClient(
+            self,
+            GripperCommand,
+            '/left_gripper_controller/gripper_cmd'
+        )
+
+        # Subscribe to joint states to track gripper position
+        self.create_subscription(
+            JointState,
+            '/joint_states',
+            self.joint_state_callback,
+            10
+        )
+
         # Always use hand frame
         self.frame_to_publish = 'openarm_left_hand'
         self.joint_vel_cmd = 1.0
+
+        # Gripper control
+        self.gripper_max_position = 0.044  # Fully open (44mm)
+        self.gripper_min_position = 0.0    # Fully closed
+        self.gripper_current_position = 0.022  # Start at middle
+        self.gripper_step = 0.002  # 2mm per keypress
 
         self.get_logger().info("Keyboard Servo Control for OpenArm")
         self.get_logger().info("----------------------------------")
@@ -46,7 +70,20 @@ class KeyboardServo(Node):
         self.get_logger().info("Frame: openarm_left_hand (fixed)")
         self.get_logger().info("1-7: Joint jog")
         self.get_logger().info("R: Reverse joint jog direction")
+        self.get_logger().info("----------------------------------")
+        self.get_logger().info("GRIPPER CONTROL:")
+        self.get_logger().info("  G: Open gripper (+2mm per press)")
+        self.get_logger().info("  H: Close gripper (-2mm per press)")
+        self.get_logger().info("----------------------------------")
         self.get_logger().info("Q: Quit")
+
+    def joint_state_callback(self, msg):
+        """Update current gripper position from joint states"""
+        try:
+            idx = msg.name.index('openarm_left_finger_joint1')
+            self.gripper_current_position = msg.position[idx]
+        except (ValueError, IndexError):
+            pass  # Joint not found in this message
 
     def get_key(self):
         """Read a single keypress from stdin"""
@@ -61,9 +98,33 @@ class KeyboardServo(Node):
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
         return ch
 
+    def send_gripper_command(self, delta):
+        """Send gripper command via action client with incremental position"""
+        # Calculate new position
+        new_position = self.gripper_current_position + delta
+
+        # Clamp to valid range
+        new_position = max(self.gripper_min_position, min(self.gripper_max_position, new_position))
+
+        # Send command
+        goal_msg = GripperCommand.Goal()
+        goal_msg.command.position = new_position
+        goal_msg.command.max_effort = 100.0  # Max effort
+
+        self.get_logger().info(f"[Gripper CMD] {self.gripper_current_position:.4f}m -> {new_position:.4f}m (delta={delta:+.4f}m)")
+
+        # Update internal position (will be updated by joint_state_callback)
+        self.gripper_current_position = new_position
+
+        # Send goal (non-blocking)
+        self.gripper_action_client.send_goal_async(goal_msg)
+
     def run(self):
         """Main loop to read keyboard and publish commands"""
         while rclpy.ok():
+            # Spin once to process callbacks (for action client)
+            rclpy.spin_once(self, timeout_sec=0.0)
+
             key = self.get_key()
 
             twist_msg = TwistStamped()
@@ -117,6 +178,12 @@ class KeyboardServo(Node):
                 joint_msg.joint_names = [f'openarm_left_joint{joint_num}']
                 joint_msg.velocities = [self.joint_vel_cmd]
                 publish_joint = True
+            elif key == 'g' or key == 'G':
+                # Open gripper (increase position)
+                self.send_gripper_command(self.gripper_step)
+            elif key == 'h' or key == 'H':
+                # Close gripper (decrease position)
+                self.send_gripper_command(-self.gripper_step)
             elif key == 'q' or key == 'Q':
                 self.get_logger().info("Exiting keyboard control...")
                 break
