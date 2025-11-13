@@ -29,6 +29,8 @@ setup(
             'keyboard_servo_left = openarm_servo.keyboard_servo_left:main',
             'keyboard_servo_right = openarm_servo.keyboard_servo_right:main',
             'keyboard_servo_both = openarm_servo.keyboard_servo_both:main',
+            'quest_servo_right = openarm_servo.quest_servo_right:main',
+            'homing_right = openarm_servo.homing_right:main',
             'twist_transformer = openarm_servo.twist_transformer:main',
             'servo_monitor = openarm_servo.servo_monitor:main',
         ],
