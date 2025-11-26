@@ -8,9 +8,11 @@ Quest VR Teleoperation for OpenArm Left Arm
 
 import rclpy
 from rclpy.node import Node
+from rclpy.action import ActionClient
 from control_msgs.msg import JointJog
 from sensor_msgs.msg import JointState
 from geometry_msgs.msg import TwistStamped
+from control_msgs.action import GripperCommand
 import time
 import socket
 import json
@@ -20,7 +22,7 @@ from scipy.spatial.transform import Rotation as R
 
 
 class QuestServoLeft(Node):
-    def __init__(self, host='0.0.0.0', port=5455):
+    def __init__(self, host='0.0.0.0', port=5454):
         super().__init__('quest_servo_left')
 
         # Publishers
@@ -30,15 +32,21 @@ class QuestServoLeft(Node):
         # Subscriber
         self.joint_sub = self.create_subscription(JointState, '/joint_states', self.joint_state_callback, 10)
 
+        # Gripper action client
+        self.gripper_action_client = ActionClient(
+            self,
+            GripperCommand,
+            '/left_gripper_controller/gripper_cmd'
+        )
+
         # Joint positions
         self.current_positions = {}
 
         # Home positions
-        self.home_joint1 = -0.306763475322849
-        self.home_joint4 = 1.8726237741283485
+        self.home_joint4 = 1.58  # Only homing joint4 to 1.58
 
         # State machine
-        # 0: waiting, 1: homing j1, 2: homing j4, 3: calibration, 4: teleoperation
+        # 0: waiting, 1: homing j4, 2: calibration, 3: teleoperation
         self.stage = 0
         self.joint_vel = 2.0
         self.threshold = 0.01
@@ -61,6 +69,11 @@ class QuestServoLeft(Node):
         self.linear_scale = 5.0
         self.angular_scale = 5.0
 
+        # Gripper control
+        self.gripper_min_position = 0.0    # Fully closed
+        self.gripper_max_position = 0.044  # Fully open (44mm)
+        self.prev_trigger = None  # Previous trigger value to detect changes
+
         # Socket server
         self.host = host
         self.port = port
@@ -70,9 +83,9 @@ class QuestServoLeft(Node):
 
         self.get_logger().info("=== Quest Teleoperation (LEFT) ===")
         self.get_logger().info("Stage 0: Waiting 3s")
-        self.get_logger().info("Stage 1-2: Homing")
-        self.get_logger().info("Stage 3: Calibration (5s)")
-        self.get_logger().info("Stage 4: Teleoperation")
+        self.get_logger().info("Stage 1: Homing J4 to 1.58")
+        self.get_logger().info("Stage 2: Calibration (5s)")
+        self.get_logger().info("Stage 3: Teleoperation")
 
     def joint_state_callback(self, msg):
         for name, position in zip(msg.name, msg.position):
@@ -146,6 +159,26 @@ class QuestServoLeft(Node):
         # Convert back to quaternion
         return R.from_matrix(mat_swapped).as_quat()
 
+    def send_gripper_command(self, trigger_value):
+        """
+        Send gripper command based on trigger value (0~1)
+        INVERTED: 0 (release) = open, 1 (press) = close
+        """
+        # INVERTED: trigger 0 (release) = open, trigger 1 (press) = close
+        inverted_trigger = 1.0 - trigger_value
+
+        # Map inverted trigger (0~1) to gripper position (0.0~0.044)
+        gripper_position = self.gripper_min_position + \
+                          (inverted_trigger * (self.gripper_max_position - self.gripper_min_position))
+
+        # Create and send goal
+        goal_msg = GripperCommand.Goal()
+        goal_msg.command.position = gripper_position
+        goal_msg.command.max_effort = 100.0
+
+        # Send goal (non-blocking)
+        self.gripper_action_client.send_goal_async(goal_msg)
+
     def run(self):
         """Main loop"""
         # Stage 0: Wait 3 seconds
@@ -155,12 +188,11 @@ class QuestServoLeft(Node):
             time.sleep(0.01)
 
         # Check joint states received
-        if 'openarm_left_joint1' not in self.current_positions:
+        if 'openarm_left_joint4' not in self.current_positions:
             self.get_logger().error("No joint states!")
             return
 
         # Start homing
-        self.get_logger().info(f"[HOMING] j1: {self.current_positions['openarm_left_joint1']:.3f} -> {self.home_joint1:.3f}")
         self.get_logger().info(f"[HOMING] j4: {self.current_positions.get('openarm_left_joint4', 0):.3f} -> {self.home_joint4:.3f}")
         self.stage = 1
 
@@ -170,35 +202,23 @@ class QuestServoLeft(Node):
         while rclpy.ok():
             rclpy.spin_once(self, timeout_sec=0.0)
 
-            # Stage 1: Homing joint1
+            # Stage 1: Homing joint4
             if self.stage == 1:
-                current = self.current_positions.get('openarm_left_joint1', 0)
-                delta = self.home_joint1 - current
-
-                if abs(delta) < self.threshold:
-                    self.get_logger().info(f"[HOMING] j1 done ({current:.3f})")
-                    self.stage = 2
-                    msg_count = 0
-                else:
-                    vel = self.joint_vel if delta > 0 else -self.joint_vel
-                    msg = JointJog()
-                    msg.header.stamp = self.get_clock().now().to_msg()
-                    msg.header.frame_id = 'openarm_body_link0'
-                    msg.joint_names = ['openarm_left_joint1']
-                    msg.velocities = [vel]
-                    self.joint_pub.publish(msg)
-
-            # Stage 2: Homing joint4
-            elif self.stage == 2:
                 current = self.current_positions.get('openarm_left_joint4', 0)
                 delta = self.home_joint4 - current
 
                 if abs(delta) < self.threshold:
                     self.get_logger().info(f"[HOMING] j4 done ({current:.3f})")
+
+                    # Open gripper after homing
+                    self.get_logger().info("[GRIPPER] Opening gripper...")
+                    self.send_gripper_command(0.0)  # 0.0 = fully open (inverted)
+
                     self.get_logger().info("[CALIBRATION] Waiting for Quest data...")
-                    self.stage = 3
+                    self.stage = 2
                     self.calibration_start_time = None  # Will start when Quest data received
                     self.calibration_samples = []
+                    msg_count = 0
                 else:
                     vel = self.joint_vel if delta > 0 else -self.joint_vel
                     msg = JointJog()
@@ -208,8 +228,8 @@ class QuestServoLeft(Node):
                     msg.velocities = [vel]
                     self.joint_pub.publish(msg)
 
-            # Stage 3: Calibration (collect samples for 5 seconds)
-            elif self.stage == 3:
+            # Stage 2: Calibration (collect samples for 5 seconds)
+            elif self.stage == 2:
                 # Log waiting status every 1 second
                 if self.calibration_start_time is None:
                     msg_count += 1
@@ -259,14 +279,15 @@ class QuestServoLeft(Node):
                         self.get_logger().info(f"[CALIBRATION] Done! Samples: {len(self.calibration_samples)}")
                         self.get_logger().info(f"[CALIBRATION] Ref pos: {self.reference_position}")
                         self.get_logger().info("[TELEOPERATION] Ready! Move controller.")
-                        self.stage = 4
+                        self.stage = 3
                     else:
                         self.get_logger().error("[CALIBRATION] No data received!")
                         return
 
-            # Stage 4: Teleoperation
-            elif self.stage == 4:
+            # Stage 3: Teleoperation
+            elif self.stage == 3:
                 self.publish_quest_twist()
+                self.publish_gripper_command()
 
             time.sleep(0.01)
 
@@ -334,6 +355,24 @@ class QuestServoLeft(Node):
         self.prev_position = current_pos
         self.prev_rotation = current_quat
         self.prev_timestamp = timestamp
+
+    def publish_gripper_command(self):
+        """Read trigger value from Quest and send gripper command"""
+        with self.data_lock:
+            if not self.latest_quest_data:
+                return
+            quest_data = self.latest_quest_data.copy()
+
+        left = quest_data.get('left', {})
+        if not left.get('enabled', False):
+            return
+
+        trigger = left.get('trigger', 0.0)
+
+        # Send command only when trigger changes significantly
+        if self.prev_trigger is None or abs(trigger - self.prev_trigger) > 0.01:
+            self.send_gripper_command(trigger)
+            self.prev_trigger = trigger
 
     def destroy_node(self):
         self.running = False
