@@ -36,7 +36,7 @@ OpenArm 프로젝트에서 사용하는 로봇 팔/목 제어 워크스페이스
   - `left_joint_trajectory_controller`
   - `left_gripper_controller`
 - `robot_state_publisher` (Composable)
-- `moveit_servo::servo_node_main` (기본 네임스페이스)
+- `moveit_servo::servo_node` (기본 네임스페이스)
 - `moveit_servo::JoyToServoPub` + `joy_node` (Composable container)
 
 **`ros2 launch openarm_servo servo_right.launch.py`**
@@ -48,7 +48,7 @@ OpenArm 프로젝트에서 사용하는 로봇 팔/목 제어 워크스페이스
 
 - RViz 구성 파일을 `config/openarm_servo_bimanual.rviz`로 교체하고, 좌/우 조인트/그리퍼 컨트롤러 네 개를 모두 스폰합니다.
 - `robot_state_publisher`, `JoyToServoPub`, `joy_node`는 공용 컨테이너에서 실행됩니다.
-- `moveit_servo::servo_node_main`을 **두 번** 띄워 각각 `left/servo_node`와 `right/servo_node` 네임스페이스를 사용합니다. 런치 파일에서 3초 지연 후 `/left/servo_node/start_servo`, `/right/servo_node/start_servo` 서비스를 자동 호출해 양팔 Servo를 동시에 활성화합니다.
+- `moveit_servo::servo_node`를 **두 번** 띄워 각각 `left/servo_node`와 `right/servo_node` 네임스페이스를 사용합니다. 런치 파일에서 3초 지연 후 `/left/servo_node/start_servo`, `/right/servo_node/start_servo` 서비스를 자동 호출해 양팔 Servo를 동시에 활성화합니다.
 
 위 런치 파일들은 모두 기본값으로 `use_fake_hardware:=true`를 사용하므로 물리 하드웨어 없이도 RViz에서 동작을 확인할 수 있습니다. 실제 장비를 사용할 때는 MoveIt config 매핑에서 `use_fake_hardware`를 `false`로 바꾸고, `ros2_controllers.yaml`을 실제 하드웨어 인터페이스에 맞게 수정하세요.
 

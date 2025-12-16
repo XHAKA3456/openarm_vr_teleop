@@ -153,7 +153,7 @@ def generate_launch_description():
     # Left arm servo node
     servo_node_left = Node(
         package="moveit_servo",
-        executable="servo_node_main",
+        executable="servo_node",
         namespace="left",
         parameters=[
             servo_params_left,
@@ -167,7 +167,7 @@ def generate_launch_description():
     # Right arm servo node
     servo_node_right = Node(
         package="moveit_servo",
-        executable="servo_node_main",
+        executable="servo_node",
         namespace="right",
         parameters=[
             servo_params_right,
